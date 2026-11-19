@@ -49,7 +49,7 @@ Rough guide: -30 to -60 dBm excellent, -60 to -70 good, -70 to -80 fair, -80 to 
 3. Add the sensor library: **Tools > Manage Libraries**, search **Adafruit INA219**, install it (say yes to installing its dependencies).
 4. Pick **Tools > Board > ESP32 Dev Module**.
 5. Upload `sender/sender.ino` to one module and label it SENDER.
-6. Upload `receiver/receiver.ino` to the other (keep `page.h` in the same folder) and label it RECEIVER.
+6. Upload `receiver/receiver.ino` to the other and label it RECEIVER.
 7. Always upload both sketches from the same version of this code. If they don't match, the receiver ignores the sender's packets.
 8. Screw the antennas on **before** powering up. Running the radio without an antenna can damage it.
 
