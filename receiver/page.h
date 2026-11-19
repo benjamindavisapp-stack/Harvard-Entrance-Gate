@@ -27,6 +27,9 @@ padding:16px;padding-top:max(16px,env(safe-area-inset-top))}
 .stat .k{font-size:13px;color:var(--muted)}
 .stat .v{font-size:28px;font-weight:600;font-variant-numeric:tabular-nums}
 canvas{width:100%;height:220px;display:block}
+.sun{color:#f5b301}
+h2{margin:0 0 10px;font-size:18px}
+.head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
 button{font:inherit;font-weight:600;border:0;border-radius:10px;padding:12px 18px;
 background:#3b82f6;color:#fff}
 button.sec{background:var(--line);color:var(--text)}
@@ -60,13 +63,33 @@ th{color:var(--muted);font-weight:500;font-size:13px}
 </div>
 
 <div class="card">
+  <h2>&#9728;&#65038; Solar panel</h2>
+  <div class="big sun"><span id="watts">--</span> <small>W</small></div>
+  <div class="hint" id="solarNote" style="margin-top:6px"></div>
+</div>
+<div class="grid">
+  <div class="card stat"><div class="k">Voltage</div><div class="v" id="volts">--</div></div>
+  <div class="card stat"><div class="k">Current</div><div class="v" id="amps">--</div></div>
+  <div class="card stat"><div class="k">Energy collected</div><div class="v" id="energy">--</div></div>
+  <div class="card stat"><div class="k">Peak power</div><div class="v" id="peak">--</div></div>
+</div>
+<div class="card">
+  <div class="head">
+    <div class="hint">Solar power, one-minute averages (up to 24 hours)</div>
+    <button class="sec" id="csv">Download CSV</button>
+  </div>
+  <canvas id="solarChart"></canvas>
+  <div class="hint" id="logInfo" style="margin-top:6px"></div>
+</div>
+
+<div class="card">
   <div class="row" style="margin-bottom:10px">
     <button id="mark">Log this spot</button>
     <button class="sec" id="reset">Reset stats</button>
     <button class="sec" id="clear">Clear log</button>
   </div>
   <div class="hint">Walk the sender away, stop, and tap "Log this spot" to save the reading with a distance or note.</div>
-  <table><thead><tr><th>Time</th><th>Note</th><th>RSSI</th><th>Back</th><th>Loss</th></tr></thead>
+  <table><thead><tr><th>Time</th><th>Note</th><th>RSSI</th><th>Back</th><th>Loss</th><th>Solar</th></tr></thead>
   <tbody id="log"></tbody></table>
 </div>
 
@@ -104,6 +127,15 @@ function render(d){
   $('ack').textContent=d.ackOk?d.ack+' dBm':'--';
   $('minmax').textContent=d.max>-127?d.max+' / '+d.min:'--';
   $('counts').textContent=d.rx+' / '+d.lost;
+  const sOk=d.solarOk&&d.have;
+  $('watts').textContent=sOk?(d.mw/1000).toFixed(2):'--';
+  $('volts').textContent=sOk?d.v.toFixed(2)+' V':'--';
+  $('amps').textContent=sOk?(d.ma>=1000?(d.ma/1000).toFixed(2)+' A':d.ma.toFixed(0)+' mA'):'--';
+  $('energy').textContent=sOk?(d.mwh>=1000?(d.mwh/1000).toFixed(2)+' Wh':d.mwh.toFixed(1)+' mWh'):'--';
+  $('peak').textContent=sOk?(d.peak/1000).toFixed(2)+' W':'--';
+  $('solarNote').textContent=!d.have?'Waiting for sender':!d.solarOk?'Sender has no INA219 sensor (check wiring)':
+    (ok?'Live from the sender':'Last reading before signal was lost')+'. Energy counts from when the sender was switched on.';
+  if(d.logN!==logN){logN=d.logN;loadSolarLog()}
   hist.push(ok?d.avg:null);if(hist.length>MAXH)hist.shift();
   draw();
 }
@@ -111,7 +143,7 @@ function render(d){
 function draw(){
   const c=$('chart'),dpr=window.devicePixelRatio||1,w=c.clientWidth,h=c.clientHeight;
   c.width=w*dpr;c.height=h*dpr;const g=c.getContext('2d');g.scale(dpr,dpr);
-  const top=-30,bot=-100,y=v=>(top-v)/(top-bot)*h;
+  const top=-30,bot=-105,y=v=>(top-v)/(top-bot)*h;
   g.font='11px -apple-system,sans-serif';g.fillStyle=col('--muted');g.strokeStyle=col('--line');g.lineWidth=1;
   for(let v=-40;v>=-100;v-=20){g.beginPath();g.moveTo(32,y(v));g.lineTo(w,y(v));g.stroke();g.fillText(v,0,y(v)+4)}
   const x=i=>32+(w-32)*i/(MAXH-1);
@@ -121,6 +153,37 @@ function draw(){
     pen?g.lineTo(px,py):g.moveTo(px,py);pen=true});
   g.stroke();
 }
+
+// 24-hour solar log, stored on the receiver
+let solar=[],logN=-1,logUp=0;
+async function loadSolarLog(){
+  try{const r=await fetch('/solarlog',{cache:'no-store'});solar=await r.json();logUp=last?last.up:0;drawSolar()}catch(e){}
+}
+const realTime=t=>new Date(Date.now()-(logUp/1000-t)*1000);
+function drawSolar(){
+  const c=$('solarChart'),dpr=window.devicePixelRatio||1,w=c.clientWidth,h=c.clientHeight;
+  c.width=w*dpr;c.height=h*dpr;const g=c.getContext('2d');g.scale(dpr,dpr);
+  const pad=18,max=Math.max(1,...solar.map(e=>e[3]/1000))*1.1,y=v=>(h-pad)-(v/max)*(h-pad-6);
+  g.font='11px -apple-system,sans-serif';g.fillStyle=col('--muted');g.strokeStyle=col('--line');g.lineWidth=1;
+  for(let i=0;i<=3;i++){const v=max*i/3;g.beginPath();g.moveTo(36,y(v));g.lineTo(w,y(v));g.stroke();g.fillText(v.toFixed(v<10?1:0)+'W',0,y(v)+4)}
+  $('logInfo').textContent=solar.length?solar.length+' minutes recorded. The log is kept while the receiver stays powered on.':'No solar data recorded yet (first point after 1 minute).';
+  if(solar.length<1)return;
+  const t0=solar[0][0],t1=Math.max(t0+60,solar[solar.length-1][0]),x=t=>36+(w-40)*(t-t0)/(t1-t0);
+  const fmt=t=>realTime(t).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  g.fillText(fmt(t0),36,h-2);const e=fmt(t1);g.fillText(e,w-g.measureText(e).width,h-2);
+  g.lineWidth=2.5;g.strokeStyle='#f5b301';g.beginPath();
+  solar.forEach((p,i)=>{const px=x(p[0]),py=y(p[3]/1000);
+    (i&&p[0]-solar[i-1][0]<=150)?g.lineTo(px,py):g.moveTo(px,py)});
+  if(solar.length===1){g.arc(x(solar[0][0]),y(solar[0][3]/1000),3,0,7)}
+  g.stroke();
+}
+$('csv').onclick=()=>{
+  const rows=['time,voltage_V,current_mA,power_W,energy_since_sender_on_Wh'];
+  solar.forEach(p=>rows.push([realTime(p[0]).toLocaleString().replace(/,/g,''),p[1].toFixed(3),p[2].toFixed(1),(p[3]/1000).toFixed(3),(p[4]/1000).toFixed(4)].join(',')));
+  const url=URL.createObjectURL(new Blob([rows.join('\n')],{type:'text/csv'}));
+  const a=document.createElement('a');a.href=url;a.download='solar-log.csv';document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),5000);
+};
 
 async function poll(){
   try{
@@ -136,18 +199,19 @@ let log=[];
 try{log=JSON.parse(localStorage.getItem('rangeLog')||'[]')}catch(e){}
 function saveLog(){try{localStorage.setItem('rangeLog',JSON.stringify(log))}catch(e){}}
 function showLog(){
-  $('log').innerHTML=log.map(r=>`<tr><td>${r.t}</td><td>${r.n}</td><td>${r.r}</td><td>${r.a}</td><td>${r.l}</td></tr>`).join('');
+  $('log').innerHTML=log.map(r=>`<tr><td>${r.t}</td><td>${r.n}</td><td>${r.r}</td><td>${r.a}</td><td>${r.l}</td><td>${r.s||'--'}</td></tr>`).join('');
 }
 const esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 $('mark').onclick=()=>{
   if(!last)return;
   const n=prompt('Distance or note for this spot (e.g. 150 m):','')||'';
   log.unshift({t:new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}),n:esc(n),
-    r:last.connected?last.avg+' dBm':'no signal',a:last.ackOk?last.ack+' dBm':'--',l:last.loss.toFixed(0)+'%'});
+    r:last.connected?last.avg+' dBm':'no signal',a:last.ackOk?last.ack+' dBm':'--',l:last.loss.toFixed(0)+'%',
+    s:last.solarOk?(last.mw/1000).toFixed(2)+' W':'--'});
   saveLog();showLog();
 };
 $('clear').onclick=()=>{if(confirm('Clear the spot log?')){log=[];saveLog();showLog()}};
 $('reset').onclick=()=>fetch('/reset');
-window.addEventListener('resize',draw);
+window.addEventListener('resize',()=>{draw();drawSolar()});
 showLog();poll();
 </script></body></html>)HTML";
